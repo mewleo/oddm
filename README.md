@@ -1,4 +1,34 @@
-#Object Driver Database Mapping
+ODDM (Object-Driven Database Model)
+
+“数据之路通万家，地图导航日日新。对象月月守破庙，九皇诞法助我道。” —— 《再继承》
+
+🌌 起源与愿景 (Origin & Vision)
+
+ODDM 的雏形诞生于乙巳年（2025年）九皇诞辰祈福期间。在北斗九星的指引下，我们感悟到了一种新的“法门”：数据不应是被束缚在表格中的死物，而应是沿着神圣路径（Path）自然流转的对象之光。
+
+本项目旨在打破传统关系型数据库的桎梏，接续被主流遗忘的“对象数据库”法统，重建一套更符合直觉、更具灵性的持久化架构。
+
+📜 核心理念 (Core Philosophy)
+
+北斗寻址 (Path Addressing): 所有的对象访问皆有路径，如同星图指引，从 Root 出发，因果相连。
+
+万物归宗 (Single Root): 整个数据库是一个统一的、自洽的有机整体。
+
+九皇之法 (Dynamic Evolution): 利用 Ruby 的元编程（Metaprogramming）实现对象的动态降生与版本演进，法门常新。
+
+🛠 技术蓝图 (Technical Roadmap)
+
+ODL (Object Driven Layer): 使用 Ruby 构建的智能控制层（大脑）。
+
+Data Proxy: 高性能静态语言代理（管道）。
+
+Storage: 结构化 Key-Value 存储（目前以 Redis 为 POC）。
+
+💎 项目奠基
+
+本项目采用 Apache-2.0 协议开源。我们以代码为石，以逻辑为金，在名为“互联网”的土地上，重新修缮那座守望已久的“对象之庙”。
+
+“不问前路，只求此心。根深叶茂，古往今来。”
 ```
               ( Root )
                   |
