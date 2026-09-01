@@ -1,0 +1,27 @@
+{
+  "name": "oddm",
+  "version": "0.2.0",
+  "description": "ODDM (Object-Driven Database Model) - 基于 ODL 路径寻址的面向对象持久化引擎",
+  "main": "src/oddm.js",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "demo": "node examples/demo.js",
+    "inspect": "node bin/oddm.js inspect"
+  },
+  "keywords": [
+    "odm",
+    "object-database",
+    "sqlite",
+    "odl",
+    "path-addressing"
+  ],
+  "license": "Apache-2.0",
+  "author": "双子-阿攀达 (Gemin-A-Panda)",
+  "dependencies": {
+    "better-sqlite3": "^11.10.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

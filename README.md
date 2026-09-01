@@ -186,3 +186,84 @@ user_data = client.get("User/u1001")
 db_helper.destroy("Root.User['u1001']", recursive: true) # 清理 user 及其下包含的 order
 
 ```
+
+---
+
+# v0.2.0：JavaScript 实现（工程化版本）
+
+JS 实现已完成工程化改造，可测试、可维护，并补齐了概念文档中承诺但此前未落地的
+自省接口与 APL 日志。原 `oddm_beta.js` / `.py` / `.rb` 保留为历史参考，不再改动。
+
+```bash
+npm install          # 依赖：better-sqlite3
+npm test             # 89 项 node:test 用例
+npm run demo         # 端到端演示
+node bin/oddm.js inspect data.db --json   # 自省快照，可直接喂给工具链
+```
+
+## 快速上手
+
+```js
+const { Client, DBHelper } = require('./src/oddm');
+
+const client = new Client({ path: 'data.db', apl: 'debug' });
+const helper = new DBHelper(client);
+
+client.defineClass('User', { name: 'string', age: 'int', score: 'float' });
+client.defineClass('Post', { title: 'string', published: 'boolean' });
+
+// 路径即拓扑：中间节点自动登记，无需外键表
+client.put("Root.User['apanda']", { name: 'apanda', age: 41, score: 98.5 });
+client.put("Root.User['apanda'].Post['p1']", { title: 'ODDM 指南', published: true });
+
+helper.where('Post', { published: true });        // ['Post/p1']
+helper.canonicalPath('Post/p1');                  // "Root.User['apanda'].Post['p1']"
+client.introspect();                              // 全库自省快照
+```
+
+## 与 Beta 版的行为差异
+
+| 行为 | Beta 版 | v0.2.0 |
+| --- | --- | --- |
+| 物理名 `put` / `update_diff` 子节点 | 把节点重挂到 Root，破坏树 | 父级保持不变，拓扑变更须走 `moveTo` |
+| 多数据库实例 | schema 缓存进程级共享，互相串扰 | 每个 Client 独立缓存 |
+| 深层路径中间节点 | 不入库，反解路径断链 | 自动补建占位节点 |
+| `where` 混入未注册属性 | 静默返回空数组 | 部分未定义时 warn 并继续，全部未定义时报错 |
+| 条件值类型 | 依赖 SQLite 隐式亲和性 | 按 schema 显式转型 |
+| schema 外属性 | 静默丢弃 | strict 模式报错，可降级为跳过并记录 |
+| 物理名写入的版本 | 默认 1.0，会降级已存在的对象 | 沿用索引版本，须显式 `migrate: true` |
+| `moveTo` 环检测 | 无，可形成环使递归 CTE 失控 | 前置检测，并校验重挂载后深度 |
+| 深度限制 | 无 | `maxDepth`（默认 10）双向校验 |
+| 错误 | 裸字符串 `raise` | 8 类错误，带 `path` / `layer` / `sql` / 错误码 |
+
+## 新增 API
+
+```js
+client.introspect({ treeDepth: 2, includeSample: true })
+// -> { root, odlSyntax, maxDepth, strict, classes[], tree, stats }
+//    classes[] 含 schema / columns / instanceCount / samplePath / sampleObject
+
+client.introspectClass('User')       // 单类详情，标注各属性支持的比较运算
+
+helper.canonicalPath('Post/p1')      // 反解完整 ODL 路径
+helper.ancestors('Post/p1')          // 祖先链
+helper.descendants('User/apanda')    // 整棵子树
+helper.siblings('Post/p1')           // 兄弟节点
+helper.children('User/apanda')       // 直系子节点
+```
+
+`introspect()` 是给 AI 与工具链的入口：它把「有哪些类、每个类有哪些属性、
+路径长什么样、树上现在有什么」一次性交代清楚，使 AI 无需猜 schema 即可开始操作。
+
+## APL 寻址路径日志
+
+```js
+const client = new Client({ apl: { level: 'debug', includeSql: true } });
+```
+
+```
+[APL-DEBUG] 路径: Root.User['apanda'].Post['p1'] | 层级: Post | 操作: put_attribute | 耗时: 0.03ms
+[APL-ERROR] 失败路径: Root.User['apanda'].Post | 层级: Post | 操作: put | 未定义的类型 Post
+```
+
+完整变更见 [CHANGELOG.md](./CHANGELOG.md)。

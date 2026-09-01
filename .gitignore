@@ -54,3 +54,18 @@ build-iPhoneSimulator/
 
 # Used by RuboCop. Remote config files pulled in from inherit_from directive.
 # .rubocop-https?--*
+
+## Node / ODDM JS 实现
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# 本地数据库文件与运行产物
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+tmp_*.db
+
+.DS_Store
