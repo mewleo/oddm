@@ -44,106 +44,145 @@ Storage: 结构化 Key-Value 存储（目前以 Redis 为 POC）。
   |
   O <- Comments[0]
 ```
+
+# ODDM (Object Domain Data Model) 驱动框架Beta版本使用指南
+
+本文档专为 AI Coding Agent 快速解析与集成设计。ODDM 是一个基于 ODL（Object Description Language）路径寻址与强类型隔离表构成的无外键树状面向对象数据模型引擎。
+
 ---
+
+## 1. 核心架构与概念
+
+* **ODL 路径规范**：格式为 `Root.ClassName['Key'].ChildClass['ChildKey']`。
+* 根节点固定为 `Root`。
+* 节点物理标识：`ClassName/Key`（如 `User/apanda`、`Post/2`）。
+
+
+* **黑盒双层架构**：
+* **`ODDM::Client`**：核心基础接口，负责 Schema 注册、ODL 路径解析、内存 Cache 管理与底层 CRUD。
+* **`ODDM::DBHelper`**：扩展辅助接口，提供事务管理、差量更新（Diff Update）、SQL 条件查询、拓扑调整与级联删除。
+
+
+
+---
+
+## 2. 元类型数据映射表
+
+在 `define_class` 注册元类型时，支持以下强类型声明：
+
+| 标识字符串 | Ruby 内部类型 | 数据库存储列 | 示例值 |
+| --- | --- | --- | --- |
+| `'string'` | `String` | `v_string` | `"apanda"` |
+| `'int'` | `Integer` | `v_int` | `41` |
+| `'float'` | `Float` | `v_float` | `98.5` |
+| `'boolean'` | `TrueClass / FalseClass` | `v_boolean` | `true` |
+| `'datetime'` | `Time` | `v_datetime` | `Time.now` |
+| `'json'` | `Hash / Array` | `v_json` | `{"tags": ["ruby"]}` |
+
+---
+
+## 3. API 规范速查清单
+
+### `ODDM::Client` (核心门面)
+
+```ruby
+# 初始化
+client = ODDM::Client.new(':memory:') # 或文件路径 "data.db"
+
+# 1. 注册类定义
+client.define_class(class_name, schema_hash, version: "1.0")
+
+# 2. 存入对象（支持 ODL 路径或直接使用物理名称）
+client.put(path_or_object_name, attributes_hash, version: "1.0")
+
+# 3. 读取对象（返回包含已转换强类型值的 Hash）
+client.get(path_or_object_name)
+
 ```
-# oddm
-# 文件名: oddm_interface_demo.rb
-# 模块: ODDM 对象驱动层接口演示
-# 目标: 展示 ODDM 如何在 Ruby 中实现面向对象的寻址和操作，以替代传统 ORM/SQL。
-#
-# ODDM 的核心优势在于将数据操作转换为对象图的遍历和原子性操作，
-# 极大地简化了应用层的业务逻辑代码。
 
-# 假设 ODL (Object-Driven Layer) 驱动层已被初始化，并暴露了 Root 接口。
-# ODL 负责将以下操作翻译成高效的 Redis 命令序列或 SQL 子查询。
+### `ODDM::DBHelper` (高级扩展)
 
-module ODDM
-  # 模拟 ODL 提供的根对象接口
-  Root = ODL_Driver.new_connection 
+```ruby
+helper = ODDM::DBHelper.new(client)
+
+# 1. 显式事务控制
+helper.transaction do
+  client.put(...)
 end
 
-# =========================================================================
-# 场景一：创建一个新的对象实例 (Class + Instance Naming)
-# =========================================================================
+# 2. 差异化增量更新（仅写入变更字段，未变更字段不发 SQL）
+helper.update_diff(path_or_object_name, new_attributes_hash)
 
-puts "--- 场景一: 创建新的对象实例 ---"
-# ODDM 操作: 从 Root 节点挂载一个新的 'User' 实例，具名为 'gemini-panda'
-begin
-  new_user = ODDM::Root.User.create(
-    name: "Gemini Panda",
-    email: "ai@google.com",
-    role: "Developer",
-    is_active: true
-  )
-  puts "✅ 创建成功: #{new_user.path} (自动分配版本: V1.0)"
+# 3. 复合条件查询（返回匹配的 object_name 数组）
+# 支持操作符: ">", "<", ">=", "<=", "!=", "BETWEEN ... AND ..." (Range)
+helper.where(class_name, { "age" => "> 30", "score" => 90.0..100.0 })
 
-rescue ODDM::IntegrityError => e
-  puts "❌ 创建失败 (事务回滚): #{e.message}"
+# 4. 拓扑调整
+helper.children(path_or_object_name)                  # 获取直系一级子节点
+helper.siblings(path_or_object_name)                  # 获取同级兄弟节点
+helper.move_to(target_path, new_parent_path)          # 节点拓扑重挂载
+
+# 5. 级联清理
+helper.destroy(path_or_object_name, recursive: true)  # 递归删除节点及其整个子树
+
+```
+
+---
+
+## 4. 端到端快速集成代码示例
+
+Agent 可直接调用或参考以下完整的可运行代码落地应用逻辑：
+
+```ruby
+require 'sqlite3'
+require 'json'
+require 'time'
+# 假定依赖已加载：module ODDM包含 Client 与 DBHelper
+
+# Step 1: 初始化客户端与 DBHelper 助手
+client = ODDM::Client.new(':memory:')
+db_helper = ODDM::DBHelper.new(client)
+
+# Step 2: 定义领域类元结构 (Schema Definition)
+client.define_class("User", {
+  "name" => "string",
+  "age"  => "int",
+  "role" => "string"
+})
+
+client.define_class("Order", {
+  "amount"    => "float",
+  "paid"      => "boolean",
+  "created_at"=> "datetime"
+})
+
+# Step 3: 结合事务批量构建数据树 (ODL Path Construction)
+db_helper.transaction do
+  # 创建根用户
+  client.put("Root.User['u1001']", {
+    "name" => "张三",
+    "age"  => 28,
+    "role" => "admin"
+  })
+
+  # 在用户下挂载订单 (自动推导拓扑树)
+  client.put("Root.User['u1001'].Order['ord_9001']", {
+    "amount"     => 299.5,
+    "paid"       => true,
+    "created_at" => Time.now
+  })
 end
 
+# Step 4: 执行条件检索 (High Performance WHERE)
+matched_users = db_helper.where("User", { "age" => "< 30", "role" => "admin" })
+# 返回: ["User/u1001"]
 
-# =========================================================================
-# 场景二：复杂路径寻址与功能式查询 (Functionality Query)
-# =========================================================================
+# Step 5: 增量更新与只读验证
+db_helper.update_diff("User/u1001", { "age" => 29 }) # 仅 age 字段更新
+user_data = client.get("User/u1001")
+# user_data["age"] => 29
 
-puts "\n--- 场景二: 复杂路径寻址与功能式查询 ---"
+# Step 6: 节点拓扑重挂载与级联清理
+db_helper.destroy("Root.User['u1001']", recursive: true) # 清理 user 及其下包含的 order
 
-# 业务需求: 找到用户 'apanda' 所有处于 'draft' 状态的 Post 集合。
-# 传统方法需要 JOIN 或多次 SELECT。
-
-draft_posts = ODDM::Root            # 从根开始
-              .User['apanda']      # 寻址到具名对象 'apanda'
-              .Posts               # 访问其子对象集合 'Posts' (挂载关系)
-              .where(status: :draft) # 功能式筛选 (ODL 翻译成高效的 WHERE/IN 查询)
-              .order_by(:created_at, :desc)
-
-puts "✅ 查询成功: 找到 #{draft_posts.count} 篇草稿文章。"
-puts "   返回类型: ODDM::ObjectCollection (而非数据库行)"
-puts "   ---"
-
-
-# =========================================================================
-# 场景三：原子性更新 (Atomic Update)
-# =========================================================================
-
-puts "\n--- 场景三: 原子性更新 (路径寻址和操作原子化) ---"
-
-# 业务需求: 找到 'apanda' 的第一篇草稿 Post 的名字是 'ODDM-POC-V1' 的评论，并将其内容标记为 '已审核'。
-
-target_comment = draft_posts      # 沿用上一步的集合结果
-                 .find { |p| p.title == 'ODDM-POC-V1' } # 内存或二次查找
-                 .Comments['C001'] # 寻址到具名子对象 'C001'
-                 
-if target_comment
-  # ODDM 操作: 对单个对象进行原子性更新
-  target_comment.update(
-    content: target_comment.content.gsub("TODO", ""), # 业务逻辑
-    status: :approved,
-    updated_by: ODDM::Root.User['gemini-panda'] # 记录引用路径
-  )
-  
-  puts "✅ 更新成功: 路径 #{target_comment.path} 的状态已更新为 :approved"
-  # ODL 确保：[content]、[status]、[updated_by] 的修改在底层存储是原子性事务。
-
-else
-  puts "❌ 未找到目标文章或评论。"
-end
-
-# =========================================================================
-# AI 协作优势彰显：可追溯的错误处理
-# =========================================================================
-
-puts "\n--- AI 协作优势: 路径化错误处理 ---"
-
-# 假设 ODL 尝试读取一个不存在的属性
-begin
-  non_existent_value = ODDM::Root.User['apanda'].Posts[999].non_existent_attribute
-rescue ODDM::AddressingError => e
-  # ODL 抛出的错误信息直接是对象路径，AI 无需解析 SQL 错误
-  puts "🚨 ODL 捕获错误: #{e.message}"
-  # 协作优势: AI 可立即诊断出问题在 'Posts' 集合的第 999 号实例上。
-  puts "   => AI 诊断: 问题发生在对象路径层，而非底层 SQL/Redis 语法。"
-end
-
-# 协作总结: ODDM 使得我们可以在同一套对象语言上进行设计、编码和错误诊断。
 ```
