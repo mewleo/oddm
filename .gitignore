@@ -60,6 +60,9 @@ node_modules/
 npm-debug.log*
 yarn-error.log*
 
+# ODDM 本地同步脚本（依赖 cnb remote 与个人 SSH key，不入公开仓库）
+/scripts/sync.sh
+
 # 本地数据库文件与运行产物
 *.db
 *.sqlite

@@ -1,5 +1,101 @@
 # ODDM 变更记录
 
+## [0.3.1] - 2026-09-04 —— 面向 Ruby v0.3.1 的特性对齐
+
+以《版本对比 js与ruby》的结论为依据：**Node v0.2.0 保留 APL / introspect 等 AI 友好特性（灵魂层），
+把 Ruby 的面向对象能力（LazyRef / CollectionProxy / Query DSL / 继承 / 视图 / Helper）移植过来**。
+新增 `migrate`（版本数据迁移）、`createChild`/`findChild`（层级便捷方法）、可选用身份映射、
+`Helper.createCollectionView` 等关键能力，使 Node 版本与 Ruby v0.3.1 在公开语义层基本对齐。
+
+测试从 89 项扩展为 106 项，全绿。
+
+### 新增能力
+
+- **`Client.migrate(className, fromVersion, toVersion, transform?)`**
+  对齐 Ruby `Root#migrate`。把 `fromVersion` 表里所有对象搬到 `toVersion` 表，
+  在事务内执行；可选 `transform(attributes, meta) => newAttrs` 回调用于字段重塑，
+  默认保留新旧 schema 的属性交集。`__created_at__` 透传保留原始创建时间，
+  迁移完成后清理源表的孤儿属性行。返回迁移对象数。
+- **`Client.createChild(parentClass, parentKey, childClass, childKey, attributes?)`**
+  对齐 Ruby `Root#create_child`。一步完成"父节点挂子节点 + 自动登记集合视图路由
+  （生成 Node 安全标识符的 SQL view，可被 `queryObjects` 直接查询）"。
+- **`Client.findChild(parentClass, parentKey, childClass, childKey)`**
+  对齐 Ruby `Root#find_child`。校验父子关系是否一致，不匹配返回 `null`
+  （Ruby 返回 `nil`，避免对调用方抛错）。
+- **`ClassScope.createChild / findChild`** —— `db.User.createChild('apanda', 'Post', 'p1', {...})` 风格调用。
+- **`Client.identityMap` 选项** —— 默认关闭，开启后：
+  - `get(key)` 命中缓存时返回同一引用，避免在循环中重复反序列化。
+  - `put` / `dbHelper.destroy` 写入成功后自动失效对应键。
+  - `dbHelper.transaction` 提交或回滚后清空整个缓存，保证跨事务拿到的是新快照。
+  - `get(key, { fresh: true })` 可绕过缓存。
+  - `client.clearIdentityMap()` 手动清空。
+- **`Helper.createCollectionView(parentClass, parentName, childClass)`**
+  对齐 Ruby `Helper#create_collection_view`，与 `createChild` 内部使用同一路径。
+- **`ViewManager.registerCollection` 真正生成 SQL view**
+  之前仅为"路由登记"，无实际 DDL。v0.3.1 起会创建一张过滤 `oddm_root_index`
+  （按 `parent_name` + `class_name`）的轻量视图，可直接被 `queryObjects` 查询。
+
+### 内部改进
+
+- **`Repository.saveObject` 支持 `createdAt` 透传**
+  旧版本无差别覆写 `__created_at__`，迁移时丢失原始创建时间。
+  现在显式传入时以传入值为准，否则仍按"首次写定、永不改写"的原规则。
+- **`Repository.deleteAttributeRows` 新增**
+  仅删除 EAV 行的方法，不动 `oddm_root_index`。供 `migrate` 在搬表后清理孤儿属性。
+- **`Client.dbHelper.transaction` 增加事务深度追踪**
+  仅在最外层事务提交/回滚时清空身份映射缓存，避免嵌套事务里误清空。
+- **`File-Header` 版本号统一升至 `v0.3.1`**，与 `package.json` / `constants.VERSION` 三处保持一致。
+
+### 与 Ruby v0.3.1 的语义差异（有意保留）
+
+| 能力 | Node v0.3.1 | Ruby v0.3.1 | 说明 |
+| --- | --- | --- | --- |
+| `Query` | SQL 下推到 SQLite（`MAX(CASE WHEN…)`、`HAVING COUNT(DISTINCT attribute_name)`） | 内存过滤 | 节点走 SQL 下推以利用 EAV 索引；Ruby 因 ORM 选型保持内存过滤 |
+| 集合视图名 | 标识符白名单强制 | `User:apanda:Posts` 等带冒号 | Node 视图名要拼进 DDL，必须白名单 |
+| `find_by_name` | 返回 `null` | 返回 `nil` | 同一意图，不同语言习惯 |
+| 身份映射 | 默认关闭、可选启用 | 默认开启 | Node 默认关闭以不破坏既有"每次 get 都是新快照"语义 |
+
+---
+
+## [0.3.0] - 2026-09-03 —— OOP 特性全面对齐 Ruby v0.3.x
+
+把 Ruby 已实现的「类范围 / 懒引用 / 集合代理 / 查询 DSL / 继承 / 视图 / 辅助类」全套移植过来。
+本次不引入新的存储层，全部仍以 SQLite 为底层。
+
+### 新增模块
+
+- **`src/classscope.js`** —— `ClassScope`，对齐 Ruby `ClassScope`：
+  `find / findOrFail / create / put / update / touch / destroy / exists / meta /
+  all / objectNames / where / order / limit / page / count / children / ancestors /
+  descendants / query / queryObjects / transaction / createChild / findChild`。
+  通过 `db.User` 代理访问。
+- **`src/query.js`** —— 查询 DSL，SQL 下推实现（与 Ruby 的内存过滤不同）：
+  `where / order / limit / offset / page` 可链式调用；
+  终端方法 `objectNames / toArray / count / first / last / map / filter / [Symbol.iterator]`。
+  支持 `$gte` / `$lte` / `$gt` / `$lt` / `$ne` / `$in` / `$exists` / 正则 / 数组 BETWEEN。
+- **`src/lazyref.js`** —— `LazyRef`，对齐 Ruby `LazyRef`：`get()` 按需加载，
+  `toString()` 展示物理标识，未加载前属性访问抛 `LazyRefNotLoadedError`。
+- **`src/helper.js`** —— `Helper` 类，对齐 Ruby `Helper`：6 个方法模块
+  （特殊对象 / 视图 / 根路由 / 类管理 / DB 信息 / 便捷方法）。
+- **`src/views.js`** —— 视图管理器，对齐 Ruby `create_view / drop_view / query_objects`，
+  支持 `object / collection / custom` 三种视图类型 + DDL 注入防护。
+- **`src/constants.js`** —— 集中常量（`SYS_TABLE` / `SYS_ATTR` / `VIEW_TYPE` /
+  `QUERY_OP` / `OP_TO_SQL` / `VERSION` / `FILE_HEADER` / `AUTHOR`）。
+
+### 核心能力
+
+- **类继承**：`defineClass('Admin', {...}, '1.0', { parentClass: 'User' })`。
+  Admin 对象复用 User 的物理表，靠 `__class__` 列做多态。
+- **`ref` / `refs` 属性**：自动包装为 `LazyRef` / `CollectionProxy`。
+- **`Client.introspect()` 与 `introspectClass()`**：v0.2.0 已有，v0.3.0 扩展至含视图、视图路由、引用关系。
+- **`APL` 寻址路径日志**：保留并细化，按层级、操作、耗时三维度。
+
+### 测试
+
+`node --test tests/*.test.js` —— 89 项全绿（v0.3.0 起新增 query / classscope / introspect / tree 用例）。
+
+---
+
 ## [0.2.0] - 2026-09-01 —— JS 实现工程化改造
 
 以 `oddm_beta.js` 为基础重构为可测试、可维护、可被 AI 工具链消费的实现。

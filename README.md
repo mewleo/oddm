@@ -189,7 +189,88 @@ db_helper.destroy("Root.User['u1001']", recursive: true) # 清理 user 及其下
 
 ---
 
-# v0.2.0：JavaScript 实现（工程化版本）
+# v0.3.1：面向 Ruby v0.3.1 的特性对齐
+
+Node 版在 v0.2.0 的基础上，把 Ruby 端 v0.3.1 已实现的 OOP 能力（继承 / 懒引用 /
+集合代理 / 查询 DSL / 视图 / Helper）全套移植过来，并补齐 `migrate` /
+`createChild` / `findChild` / 可选身份映射 / `Helper.createCollectionView`
+等关键 API。Node 的「灵魂」能力——APL 日志、`introspect()` 全文快照——
+保持不变。
+
+完整变更与对齐表见 [CHANGELOG.md](./CHANGELOG.md) 的 `[0.3.1]` 与 `[0.3.0]` 节。
+
+```bash
+npm test             # 106 项 node:test 用例（v0.3.1 新增 17 项）
+npm run demo         # 端到端演示
+node bin/oddm.js inspect data.db --json   # 自省快照
+```
+
+## v0.3.x 快速上手
+
+```js
+const { Client, DBHelper } = require('./src/oddm');
+
+const client = new Client({ path: 'data.db', apl: 'debug', identityMap: true });
+const helper = new DBHelper(client);
+
+// 定义领域类，支持继承
+client.defineClass('User',    { name: 'string', age: 'int' });
+client.defineClass('Admin',   { level: 'int' }, '1.0', { parentClass: 'User' });
+client.defineClass('Post',    { title: 'string', published: 'boolean' });
+client.defineClass('Comment', { body: 'string', author: 'ref(User)' });
+
+// 路径即拓扑；createChild 自动登记集合视图
+client.createChild('User', 'apanda', 'Post', 'p1', {
+  title: 'ODDM 指南', published: true,
+});
+
+// 写入时 ref / refs 自动包成 LazyRef / CollectionProxy
+client.put("Root.Post['p1'].Comment['c1']", {
+  body: '赞', author: 'User/apanda',
+});
+
+const c = client.get('Comment/c1');
+c.author.get();   // 按需加载 User/apanda
+
+// Query DSL：SQL 下推到 SQLite
+client.Post.where({ published: true }).order({ created_at: 'desc' }).limit(10);
+// → [{ title: 'ODDM 指南', published: true, ... }]
+
+// 视图：把父节点下的子集合固化为可查询对象
+client.helper.createCollectionView('User', 'apanda', 'Post');
+client.views.queryObjects('User_apanda_Posts').map(o => o.title);
+
+// 层级导航
+client.findChild('User', 'apanda', 'Post', 'p1');  // 等价于 client.get('Post/p1')
+client.dbHelper.children('User/apanda');           // 直系子节点
+
+// 版本迁移（保留 created_at，可选 transform）
+client.defineClass('User', { name: 'string', age: 'int' }, '1.0');
+client.defineClass('User', { name: 'string', age: 'int', bio: 'string' }, '2.0');
+client.migrate('User', '1.0', '2.0', ent => ({ ...ent, bio: '' }));
+```
+
+## 与 Beta 版 / v0.2.0 的差异
+
+| 能力 | Beta / v0.2.0 | v0.3.x |
+| --- | --- | --- |
+| 类范围 / 懒引用 / 集合代理 | 无 | `ClassScope` / `LazyRef` / `CollectionProxy` |
+| 查询 DSL | `helper.where` 单层条件 | `Query`：链式 `where / order / limit / page`，SQL 下推 |
+| 视图 | 无 | `ViewManager`：object / collection / custom 三类 |
+| 继承 | 无 | `parentClass` 选项，子类复用父表 |
+| `ref` / `refs` 属性 | 字符串原值 | 自动包成 LazyRef / CollectionProxy |
+| 版本数据迁移 | 无 | `Client.migrate(class, from, to, transform?)` |
+| 身份映射 | 无 | 可选 `identityMap: true` |
+| Helper 类 | 无 | `Helper` 6 模块 + `createCollectionView` |
+| APL / introspect | v0.2.0 起有 | v0.3.x 保留并细化 |
+
+## 后续：企业多人知识库系统（讨论起点）
+
+> ⚠️ 处于方案讨论阶段，尚未定稿。`docs/企业知识库设计.md` 是占位草案 v0，
+> 用于逐条修订；`examples/enterprise-kb.js` 沿用草案假设做端到端演示。
+> 想从某个议题切入讨论时，参阅草案顶部的「议题清单」。
+
+## v0.2.0：JavaScript 实现（工程化版本）
 
 JS 实现已完成工程化改造，可测试、可维护，并补齐了概念文档中承诺但此前未落地的
 自省接口与 APL 日志。原 `oddm_beta.js` / `.py` / `.rb` 保留为历史参考，不再改动。
